@@ -18,6 +18,24 @@ def extract_transactions_from_file(file_path: Path) -> Iterator[Dict[str, Any]]:
         return
 
 
+def determine_transaction_source(transaction: Dict[str, Any]) -> str:
+    """Determines the source of a buy transaction based on the comment field."""
+    if transaction.get("type") != "BUY":
+        return "Funds"  # Sell transactions are always from funds
+    
+    comment = transaction.get("comment", "").upper()
+    
+    # Check for employment-based compensation
+    if "RSU" in comment:
+        return "RSU"
+    elif "ESPP" in comment:
+        return "ESPP"
+    elif "PSU" in comment:
+        return "PSU"
+    else:
+        return "Funds"  # Default to funds for cash purchases
+
+
 def format_transaction(transaction: Dict[str, Any]) -> Union[Dict[str, Any], None]:
     """Formats a single transaction record. Returns None if the record is invalid."""
     required_keys = ["type", "symbol", "date", "quantity", "pricePerShare"]
@@ -36,6 +54,7 @@ def format_transaction(transaction: Dict[str, Any]) -> Union[Dict[str, Any], Non
         "date": formatted_date,
         "quantity": transaction["quantity"],
         "price": transaction.get("pricePerShare"),
+        "source": determine_transaction_source(transaction),
     }
 
 
@@ -57,8 +76,14 @@ def write_csv(transactions: List[Dict[str, Any]], output_path: Path) -> None:
         return
 
     df = pd.DataFrame(transactions)
-    columns = ["transaction", "symbol", "date", "quantity", "price"]
+    columns = ["transaction", "symbol", "date", "quantity", "price", "source"]
     df = df[columns]
+    
+    # Sort by date (ascending order - oldest first)
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.sort_values('date')
+    df['date'] = df['date'].dt.strftime('%Y-%m-%d')  # Convert back to string format
+    
     df.to_csv(output_path, index=False)
     print(f"Successfully created {output_path}")
 
@@ -67,7 +92,7 @@ def transaction_parser() -> int:
     """Main function to run the transaction parsing and CSV generation."""
     base_dir = Path(__file__).parent.parent
     resources_path = base_dir / "src" / "resources"
-    output_csv_path = base_dir / "transactions.csv"
+    output_csv_path = resources_path / "transactions.csv"
 
     processed_data = process_transactions(resources_path)
     write_csv(processed_data, output_csv_path)
