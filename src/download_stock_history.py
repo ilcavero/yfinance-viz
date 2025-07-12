@@ -2,6 +2,7 @@ import pandas as pd
 import yfinance as yf
 import os
 from datetime import date, timedelta
+import traceback
 
 
 def get_ticker_info(ticker_symbol):
@@ -78,6 +79,8 @@ def update_stock_data(ticker_symbol, start_date, resources_path):
     try:
         history_df = get_stock_history(ticker_symbol, start_date.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d'))
 
+
+
         if history_df.empty:
             print(f"No new data found for {ticker_symbol}.\n")
             return
@@ -90,12 +93,17 @@ def update_stock_data(ticker_symbol, start_date, resources_path):
         output_df = history_df[['Close', 'Stock Splits', 'Currency']]
 
         should_write_header = not os.path.exists(output_csv) or os.path.getsize(output_csv) == 0
-        output_df.to_csv(output_csv, mode='a', header=should_write_header)
+        write_df_to_csv(output_df, output_csv, mode='a', header=should_write_header, index=False)
 
         print(f"Successfully updated {ticker_symbol}.csv\n")
 
     except Exception as e:
         print(f"Could not download data for {ticker_symbol}. Error: {e}\n")
+        traceback.print_exc()
+
+
+def write_df_to_csv(df, *args, **kwargs):
+    return df.to_csv(*args, **kwargs)
 
 
 def download_stock_history():
@@ -116,12 +124,26 @@ def download_stock_history():
         return
 
     unique_tickers = transactions_df['symbol'].unique()
+    
+    # Ensure EURUSD=X is always included for currency conversion
+    if 'EURUSD=X' not in unique_tickers:
+        unique_tickers = list(unique_tickers) + ['EURUSD=X']
+        print("Added EURUSD=X to download list for currency conversion.")
+    
     print(f"Found {len(unique_tickers)} unique tickers. Processing...\n")
 
     for ticker_symbol in unique_tickers:
         print(f"-- Processing {ticker_symbol} --")
         output_csv = os.path.join(resources_path, f"{ticker_symbol}.csv")
-        start_date = get_start_date(output_csv, transactions_df, ticker_symbol)
+        
+        # For EURUSD=X, use a default start date if not in transactions
+        if ticker_symbol == 'EURUSD=X' and ticker_symbol not in transactions_df['symbol'].values:
+            # Use a reasonable default start date (e.g., 2 years ago)
+            default_start_date = date.today() - timedelta(days=730)
+            start_date = get_start_date(output_csv, transactions_df, ticker_symbol) if os.path.exists(output_csv) else default_start_date
+        else:
+            start_date = get_start_date(output_csv, transactions_df, ticker_symbol)
+        
         update_stock_data(ticker_symbol, start_date, resources_path)
 
 

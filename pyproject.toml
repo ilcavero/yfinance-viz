@@ -10,6 +10,7 @@ dependencies = [
     "yfinance>=0.2.64",
     "plotly>=5.18.0",
     "pandas>=2.0.0",
+    "pytest-cov>=6.2.1",
 ]
 
 [dependency-groups]

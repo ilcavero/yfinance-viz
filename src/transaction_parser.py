@@ -58,14 +58,41 @@ def format_transaction(transaction: Dict[str, Any]) -> Union[Dict[str, Any], Non
     }
 
 
+def prompt_user_for_file(file_path: Path) -> bool:
+    """Prompts the user whether to process a specific JSON file. Defaults to yes."""
+    while True:
+        response = input(f"Process {file_path.name}? (Y/n): ").strip().lower()
+        if response in ['y', 'yes', '']:  # Empty string defaults to yes
+            return True
+        elif response in ['n', 'no']:
+            return False
+        else:
+            print("Please enter 'y' for yes, 'n' for no, or press Enter for yes (default).")
+
+
 def process_transactions(resource_dir: Path) -> List[Dict[str, Any]]:
-    """Processes all JSON files in a directory and returns a list of formatted transactions."""
+    """Processes JSON files in a directory and returns a list of formatted transactions.
+    Prompts the user for each JSON file found."""
     all_formatted_transactions = []
-    for json_file in resource_dir.glob("*.json"):
-        for raw_tx in extract_transactions_from_file(json_file):
-            formatted_tx = format_transaction(raw_tx)
-            if formatted_tx:
-                all_formatted_transactions.append(formatted_tx)
+    json_files = list(resource_dir.glob("*.json"))
+    
+    if not json_files:
+        print("No JSON files found in the resources directory.")
+        return all_formatted_transactions
+    
+    print(f"Found {len(json_files)} JSON file(s) in the resources directory.")
+    
+    for json_file in json_files:
+        if prompt_user_for_file(json_file):
+            print(f"Processing {json_file.name}...")
+            for raw_tx in extract_transactions_from_file(json_file):
+                formatted_tx = format_transaction(raw_tx)
+                if formatted_tx:
+                    all_formatted_transactions.append(formatted_tx)
+            print(f"Completed processing {json_file.name}")
+        else:
+            print(f"Skipping {json_file.name}")
+    
     return all_formatted_transactions
 
 

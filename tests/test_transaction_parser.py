@@ -3,6 +3,7 @@ import sys
 import pandas as pd
 import pytest
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 # Add src directory to the path to allow imports
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
@@ -12,6 +13,8 @@ from transaction_parser import (
     format_transaction,
     process_transactions,
     write_csv,
+    determine_transaction_source,
+    transaction_parser,
 )
 
 # Mock data for testing
@@ -83,6 +86,14 @@ def test_format_transaction_invalid_date():
     invalid_date_tx['date'] = 202301 # Invalid date format
     assert format_transaction(invalid_date_tx) is None
 
+def test_format_transaction_with_comment():
+    """Tests that a transaction with comment field is handled correctly."""
+    tx_with_comment = MOCK_VALID_TRANSACTION.copy()
+    tx_with_comment['comment'] = 'RSU Grant'
+    formatted = format_transaction(tx_with_comment)
+    assert formatted is not None
+    assert formatted['source'] == 'RSU'
+
 def test_extract_transactions_from_file(mock_resources_dir: Path):
     """Tests extraction of transactions from a single file."""
     file_path = mock_resources_dir / "valid_transactions.json"
@@ -90,11 +101,47 @@ def test_extract_transactions_from_file(mock_resources_dir: Path):
     assert len(transactions) == 2
     assert transactions[0]['symbol'] == 'AAPL'
 
-def test_process_transactions(mock_resources_dir: Path):
+def test_extract_transactions_from_empty_file(mock_resources_dir: Path):
+    """Tests extraction from empty JSON file."""
+    file_path = mock_resources_dir / "empty.json"
+    transactions = list(extract_transactions_from_file(file_path))
+    assert len(transactions) == 0
+
+def test_extract_transactions_from_malformed_file(mock_resources_dir: Path):
+    """Tests extraction from malformed JSON file."""
+    file_path = mock_resources_dir / "malformed.json"
+    transactions = list(extract_transactions_from_file(file_path))
+    assert len(transactions) == 0
+
+def test_extract_transactions_from_nonexistent_file(mock_resources_dir: Path):
+    """Tests extraction from non-existent file."""
+    file_path = mock_resources_dir / "nonexistent.json"
+    transactions = list(extract_transactions_from_file(file_path))
+    assert len(transactions) == 0
+
+@patch('transaction_parser.prompt_user_for_file')
+def test_process_transactions(mock_prompt, mock_resources_dir: Path):
     """Tests processing of all transaction files in a directory."""
+    # Mock user input to always return True
+    mock_prompt.return_value = True
+    
     processed = process_transactions(mock_resources_dir)
     assert len(processed) == 1 # Only one transaction is valid
     assert processed[0]['symbol'] == 'AAPL'
+
+@patch('transaction_parser.prompt_user_for_file')
+def test_process_transactions_user_skips_files(mock_prompt, mock_resources_dir: Path):
+    """Tests processing when user skips all files."""
+    # Mock user input to always return False
+    mock_prompt.return_value = False
+    
+    processed = process_transactions(mock_resources_dir)
+    assert len(processed) == 0
+
+def test_process_transactions_no_json_files(tmp_path: Path):
+    """Tests processing when no JSON files exist."""
+    processed = process_transactions(tmp_path)
+    assert len(processed) == 0
 
 def test_write_csv(tmp_path: Path):
     """Tests that the CSV file is written correctly."""
@@ -115,3 +162,128 @@ def test_write_csv(tmp_path: Path):
     df = pd.read_csv(output_csv)
     assert len(df) == 1
     assert df.iloc[0]['symbol'] == 'AAPL'
+
+def test_write_csv_empty_transactions(tmp_path: Path):
+    """Tests write_csv with empty transactions list."""
+    output_csv = tmp_path / "output.csv"
+    write_csv([], output_csv)
+    
+    # Should not create file for empty transactions
+    assert not output_csv.exists()
+
+def test_write_csv_multiple_transactions(tmp_path: Path):
+    """Tests write_csv with multiple transactions."""
+    output_csv = tmp_path / "output.csv"
+    transactions = [
+        {
+            'transaction': 'buy',
+            'symbol': 'AAPL',
+            'date': '2023-01-15',
+            'quantity': 10,
+            'price': 150.0,
+            'source': 'Funds'
+        },
+        {
+            'transaction': 'sell',
+            'symbol': 'GOOGL',
+            'date': '2023-01-10',
+            'quantity': 5,
+            'price': 200.0,
+            'source': 'Funds'
+        }
+    ]
+    write_csv(transactions, output_csv)
+    
+    assert output_csv.exists()
+    df = pd.read_csv(output_csv)
+    assert len(df) == 2
+    # Should be sorted by date (oldest first)
+    assert df.iloc[0]['date'] == '2023-01-10'
+    assert df.iloc[1]['date'] == '2023-01-15'
+
+def test_determine_transaction_source_buy_funds():
+    """Test determine_transaction_source for regular buy transaction."""
+    transaction = {'type': 'BUY', 'comment': 'Regular purchase'}
+    source = determine_transaction_source(transaction)
+    assert source == 'Funds'
+
+def test_determine_transaction_source_buy_rsu():
+    """Test determine_transaction_source for RSU transaction."""
+    transaction = {'type': 'BUY', 'comment': 'RSU Grant 2023'}
+    source = determine_transaction_source(transaction)
+    assert source == 'RSU'
+
+def test_determine_transaction_source_buy_espp():
+    """Test determine_transaction_source for ESPP transaction."""
+    transaction = {'type': 'BUY', 'comment': 'ESPP Purchase'}
+    source = determine_transaction_source(transaction)
+    assert source == 'ESPP'
+
+def test_determine_transaction_source_buy_psu():
+    """Test determine_transaction_source for PSU transaction."""
+    transaction = {'type': 'BUY', 'comment': 'PSU Award'}
+    source = determine_transaction_source(transaction)
+    assert source == 'PSU'
+
+def test_determine_transaction_source_sell():
+    """Test determine_transaction_source for sell transaction."""
+    transaction = {'type': 'SELL', 'comment': 'Any comment'}
+    source = determine_transaction_source(transaction)
+    assert source == 'Funds'
+
+def test_determine_transaction_source_no_comment():
+    """Test determine_transaction_source with no comment field."""
+    transaction = {'type': 'BUY'}
+    source = determine_transaction_source(transaction)
+    assert source == 'Funds'
+
+def test_determine_transaction_source_case_insensitive():
+    """Test determine_transaction_source with case insensitive matching."""
+    transaction = {'type': 'BUY', 'comment': 'rsu grant'}
+    source = determine_transaction_source(transaction)
+    assert source == 'RSU'
+
+@patch('transaction_parser.process_transactions')
+@patch('transaction_parser.write_csv')
+@patch('transaction_parser.Path')
+def test_transaction_parser_success(mock_path, mock_write_csv, mock_process_transactions):
+    """Test the main transaction_parser function."""
+    # Mock the path operations
+    mock_base_dir = MagicMock()
+    mock_resources_path = MagicMock()
+    mock_output_path = MagicMock()
+    
+    mock_path.return_value.parent.parent = mock_base_dir
+    mock_base_dir.__truediv__.return_value.__truediv__.return_value = mock_resources_path
+    mock_resources_path.__truediv__.return_value = mock_output_path
+    
+    # Mock process_transactions to return some data
+    mock_process_transactions.return_value = [{'transaction': 'buy', 'symbol': 'AAPL'}]
+    
+    result = transaction_parser()
+    
+    assert result == 0
+    mock_process_transactions.assert_called_once_with(mock_resources_path)
+    mock_write_csv.assert_called_once_with([{'transaction': 'buy', 'symbol': 'AAPL'}], mock_output_path)
+
+@patch('transaction_parser.process_transactions')
+@patch('transaction_parser.write_csv')
+@patch('transaction_parser.Path')
+def test_transaction_parser_empty_transactions(mock_path, mock_write_csv, mock_process_transactions):
+    """Test transaction_parser with empty transactions."""
+    # Mock the path operations
+    mock_base_dir = MagicMock()
+    mock_resources_path = MagicMock()
+    mock_output_path = MagicMock()
+    
+    mock_path.return_value.parent.parent = mock_base_dir
+    mock_base_dir.__truediv__.return_value.__truediv__.return_value = mock_resources_path
+    mock_resources_path.__truediv__.return_value = mock_output_path
+    
+    # Mock process_transactions to return empty list
+    mock_process_transactions.return_value = []
+    
+    result = transaction_parser()
+    
+    assert result == 0
+    mock_write_csv.assert_called_once_with([], mock_output_path)
