@@ -8,3 +8,15 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Generated files
+portfolio_sankey.html
+.coverage
+.mypy_cache/
+.pytest_cache/
+
+# IDE files
+.vscode/
+
+# Personal portfolio data
+src/resources/
