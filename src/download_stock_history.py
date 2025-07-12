@@ -93,7 +93,7 @@ def update_stock_data(ticker_symbol, start_date, resources_path):
         output_df = history_df[['Close', 'Stock Splits', 'Currency']]
 
         should_write_header = not os.path.exists(output_csv) or os.path.getsize(output_csv) == 0
-        write_df_to_csv(output_df, output_csv, mode='a', header=should_write_header, index=False)
+        write_df_to_csv(output_df, output_csv, mode='a', header=should_write_header)
 
         print(f"Successfully updated {ticker_symbol}.csv\n")
 

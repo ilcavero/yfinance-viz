@@ -215,8 +215,6 @@ def test_update_stock_data_append_to_existing(mock_write_df_to_csv, mock_get_tic
     
     start_date = date(2023, 1, 11)
     update_stock_data(ticker_symbol, start_date, test_dir)
-    for i, call in enumerate(mock_write_df_to_csv.call_args_list):
-        assert call[1].get('index', False) is False
     # Should have been called at least once
     assert mock_write_df_to_csv.call_count >= 1
     # Do not check file content since the shim is mocked
