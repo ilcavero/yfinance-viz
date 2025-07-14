@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yfinance-viz"
-version = "0.1.0"
+version = "0.2.0"
 description = "Yahoo Finance Portfolio Visualizer - A Python tool for downloading and visualizing stock portfolio transactions using Yahoo Finance data"
 readme = "README.md"
 authors = [
   { name="ilcavero", email="ilcavero@gmail.com" },
 ]
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.11"
 classifiers = [
     "Programming Language :: Python :: 3",

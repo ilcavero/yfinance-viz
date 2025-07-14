@@ -13,6 +13,7 @@ import os
 import argparse
 from typing import Dict, List, Tuple, Optional, Union
 from dataclasses import dataclass
+import numpy as np
 
 @dataclass
 class Position:
@@ -40,18 +41,50 @@ class PortfolioFlowTracker:
         self.currency_cache: Dict[str, str] = {}
         self.exchange_rates: Dict[str, float] = {}
         self.node_map: Dict[str, int] = {}  # symbol -> node index
+        self.transactions_df: Optional[pd.DataFrame] = None
+        self.stock_data_cache: Dict[str, Optional[pd.DataFrame]] = {}
         self._load_exchange_rates()
         self.node_labels = ["Initial Cash"]
         self.node_colors = ["#1f77b4"]
         self.node_map["Initial Cash"] = 0
 
+    def _get_transactions_df(self) -> pd.DataFrame:
+        if self.transactions_df is None:
+            transactions_file = os.path.join(self.resources_path, "transactions.csv")
+            if not os.path.exists(transactions_file):
+                self.transactions_df = pd.DataFrame(columns=['symbol', 'transaction', 'date', 'quantity', 'price', 'source'])
+            else:
+                self.transactions_df = pd.read_csv(transactions_file, parse_dates=["date"])
+                self.transactions_df['date'] = self.transactions_df['date'].dt.tz_localize(None)
+        return self.transactions_df.copy()
+
+    def _get_stock_data(self, symbol: str) -> Optional[pd.DataFrame]:
+        if symbol not in self.stock_data_cache:
+            stock_file = os.path.join(self.resources_path, f"{symbol}.csv")
+            if not os.path.exists(stock_file):
+                self.stock_data_cache[symbol] = None
+            else:
+                try:
+                    df = pd.read_csv(stock_file, index_col='Date', parse_dates=True)
+                    assert isinstance(df.index, pd.DatetimeIndex)
+                    df.index = df.index.tz_localize(None)
+                    self.stock_data_cache[symbol] = df
+                except Exception as e:
+                    print(f"Warning: Could not load or parse stock data for {symbol}: {e}")
+                    self.stock_data_cache[symbol] = None
+        
+        df = self.stock_data_cache.get(symbol)
+        return df.copy() if df is not None else None
+
     def _load_exchange_rates(self):
         try:
             eurusd_file = os.path.join(self.resources_path, "EURUSD=X.csv")
-            eurusd_df = pd.read_csv(eurusd_file)
-            eurusd_df['Date'] = pd.to_datetime(eurusd_df['Date'], utc=True)
-            for _, row in eurusd_df.iterrows():
-                date_str = row['Date'].strftime('%Y-%m-%d')
+            eurusd_df = pd.read_csv(eurusd_file, index_col='Date', parse_dates=True)
+            assert isinstance(eurusd_df.index, pd.DatetimeIndex)
+            eurusd_df.index = eurusd_df.index.tz_localize(None)
+            for date, row in eurusd_df.iterrows():
+                assert isinstance(date, pd.Timestamp)
+                date_str = date.strftime('%Y-%m-%d')
                 self.exchange_rates[date_str] = row['Close']
             # Store sorted keys for binary search
             self.sorted_rate_keys = sorted(self.exchange_rates.keys())
@@ -98,13 +131,11 @@ class PortfolioFlowTracker:
         if symbol in self.currency_cache:
             return self.currency_cache[symbol]
         try:
-            stock_file = os.path.join(self.resources_path, f"{symbol}.csv")
-            if os.path.exists(stock_file):
-                df = pd.read_csv(stock_file)
-                if 'Currency' in df.columns and len(df) > 0:
-                    currency = df.iloc[0]['Currency']
-                    self.currency_cache[symbol] = currency
-                    return currency
+            df = self._get_stock_data(symbol)
+            if df is not None and 'Currency' in df.columns and len(df) > 0:
+                currency = df.iloc[0]['Currency']
+                self.currency_cache[symbol] = currency
+                return currency
         except Exception as e:
             print(f"Warning: Could not determine currency for {symbol}: {e}")
         self.currency_cache[symbol] = "USD"
@@ -126,6 +157,7 @@ class PortfolioFlowTracker:
         elif from_currency == "EUR":
             return self._eur_to_usd(amount, date)
         else:
+            print(f"Warning: Could not get latest USD conversion rate for {from_currency} on {date}")
             return amount  # fallback, treat as USD
 
     def _add_node(self, symbol: str):
@@ -260,78 +292,109 @@ class PortfolioFlowTracker:
 
     def process_transactions(self, transactions_file: Union[str, None] = None):
         """Process all transactions and build the flow data."""
-        if transactions_file is None:
-            transactions_file = os.path.join(self.resources_path, "transactions.csv")
-        df = pd.read_csv(transactions_file)
+        df = self._get_transactions_df()
+
+        # Get all unique dates from transactions
+        all_dates = set(pd.to_datetime(df['date'].unique()))
+
+        # Get all dividend dates from all stock files mentioned in transactions
+        all_symbols = df['symbol'].unique()
+        for symbol in all_symbols:
+            stock_df = self._get_stock_data(symbol)
+            if stock_df is not None and 'Dividends' in stock_df.columns:
+                dividend_dates = stock_df[stock_df['Dividends'] > 0].index
+                for d_date in dividend_dates:
+                    all_dates.add(d_date)
         
-        # Sort by date, then by transaction type (sell=0, buy=1), then by row order
+        sorted_dates = sorted(list(all_dates))
+
+        # Sort transactions for processing
         df['transaction_type'] = df['transaction'].map({'sell': 0, 'buy': 1})
         df = df.sort_values(['date', 'transaction_type']).reset_index(drop=True)
-        
-        for idx, transaction in df.iterrows():
-            transaction_type = transaction['transaction']
-            symbol = transaction['symbol']
-            source = str(transaction.get('source', '')).upper()
-            
-            # Add nodes for all symbols first
-            self._add_node(symbol)
-            
-            if transaction_type == 'sell':
-                usd_value = self._process_sell_transaction(transaction)
-            elif transaction_type == 'buy' and source in ['RSU', 'ESPP', 'PSU']:
-                # Employment compensation transactions should NOT allocate funds from sells
-                # They are self-funded from their compensation sources
-                usd_value = self._process_buy_transaction(transaction)
+
+        for date in sorted_dates:
+            # 1. Process transactions for the current date
+            day_transactions = df[df['date'] == date]
+            for idx, transaction in day_transactions.iterrows():
+                transaction_type = transaction['transaction']
+                symbol = transaction['symbol']
+                source = str(transaction.get('source', '')).upper()
                 
-                # Create flow data for employment compensation only
-                source_label = f"{source} Compensation"
-                if source_label not in self.node_map:
-                    self.node_labels.append(source_label)
-                    self.node_colors.append("#2ca02c")
-                    self.node_map[source_label] = len(self.node_labels) - 1
-                source_idx = self.node_map[source_label]
-                target_idx = self.node_map[symbol]
-                self.flow_data.append({
-                    'source': source_idx,
-                    'target': target_idx,
-                    'value': usd_value,
-                    'date': transaction['date'],
-                    'type': source,
-                    'symbol': symbol,
-                    'quantity': transaction['quantity'],
-                    'price': transaction['price'],
-                    'from_symbol': source_label,
-                })
-            elif transaction_type == 'buy':
-                usd_value = self._process_buy_transaction(transaction)
-                allocated = self._allocate_funds(usd_value, symbol, pd.to_datetime(transaction['date']))
+                # Add nodes for all symbols first
+                self._add_node(symbol)
                 
-                # Aggregate allocations by source node
-                aggregated_allocations = {}
-                for source_symbol, amount in allocated:
-                    if source_symbol not in aggregated_allocations:
-                        aggregated_allocations[source_symbol] = 0
-                    aggregated_allocations[source_symbol] += amount
-                
-                # Create flow data for the aggregated allocations
-                for source_symbol, total_amount in aggregated_allocations.items():
-                    source_idx = self.node_map[source_symbol]
+                if transaction_type == 'sell':
+                    usd_value = self._process_sell_transaction(transaction)
+                elif transaction_type == 'buy' and source in ['RSU', 'ESPP', 'PSU']:
+                    usd_value = self._process_buy_transaction(transaction)
+                    source_label = f"{source} Compensation"
+                    if source_label not in self.node_map:
+                        self.node_labels.append(source_label)
+                        self.node_colors.append("#2ca02c")
+                        self.node_map[source_label] = len(self.node_labels) - 1
+                    source_idx = self.node_map[source_label]
                     target_idx = self.node_map[symbol]
                     self.flow_data.append({
-                        'source': source_idx,
-                        'target': target_idx,
-                        'value': total_amount,
-                        'date': transaction['date'],
-                        'type': 'Funds',
-                        'symbol': symbol,
-                        'quantity': transaction['quantity'],
-                        'price': transaction['price'],
-                        'from_symbol': source_symbol,
+                        'source': source_idx, 'target': target_idx, 'value': usd_value,
+                        'date': transaction['date'], 'type': source, 'symbol': symbol,
+                        'quantity': transaction['quantity'], 'price': transaction['price'],
+                        'from_symbol': source_label,
                     })
-        
-
+                elif transaction_type == 'buy':
+                    usd_value = self._process_buy_transaction(transaction)
+                    allocated = self._allocate_funds(usd_value, symbol, pd.to_datetime(transaction['date']))
+                    
+                    aggregated_allocations = {}
+                    for source_symbol, amount in allocated:
+                        if source_symbol not in aggregated_allocations:
+                            aggregated_allocations[source_symbol] = 0
+                        aggregated_allocations[source_symbol] += amount
+                    
+                    for source_symbol, total_amount in aggregated_allocations.items():
+                        source_idx = self.node_map[source_symbol]
+                        target_idx = self.node_map[symbol]
+                        self.flow_data.append({
+                            'source': source_idx, 'target': target_idx, 'value': total_amount,
+                            'date': transaction['date'], 'type': 'Funds', 'symbol': symbol,
+                            'quantity': transaction['quantity'], 'price': transaction['price'],
+                            'from_symbol': source_symbol,
+                        })
+            
+            # 2. Process dividends for the current date
+            for symbol in self.positions.keys():
+                stock_df = self._get_stock_data(symbol)
+                if stock_df is None or 'Dividends' not in stock_df.columns:
+                    continue
+                
+                if date in stock_df.index:
+                    dividend_per_share = stock_df.loc[date, 'Dividends']
+                    assert isinstance(dividend_per_share, (float, int, np.floating))
+                    dividend_per_share = float(dividend_per_share)
+                    if dividend_per_share > 0:
+                        position = self.positions[symbol]
+                        shares_held = position.quantity
+                        
+                        if shares_held > 0:
+                            dividend_value = shares_held * dividend_per_share
+                            currency = self._get_stock_currency(symbol)
+                            usd_dividend = self._to_usd(dividend_value, currency, date)
+                            
+                            fund_source = FundSource(
+                                source_type='dividend',
+                                symbol=symbol,
+                                amount_usd=usd_dividend,
+                                date=date,
+                                transaction_id=len(self.available_funds)
+                            )
+                            self.available_funds.append(fund_source)
 
     def create_sankey_diagram(self, title: str = "Portfolio Fund Flow (USD)") -> go.Figure:
+        def format_usd(value: float) -> str:
+            """Formats a USD value, showing 'K' for thousands if over 100."""
+            if abs(value) < 100:
+                return f"${value:,.0f}"
+            return f"${value / 1000:,.1f}K"
+            
         # Calculate net flows for each node for hover display
         node_net_flows = {}
         for flow in self.flow_data:
@@ -353,12 +416,13 @@ class PortfolioFlowTracker:
         values = [flow['value'] for flow in self.flow_data]
         customdata = [
             {
-                'date': flow['date'],
+                'date': flow['date'].strftime('%Y-%m-%d'),
                 'type': flow.get('type', ''),
                 'symbol': flow.get('symbol', ''),
                 'quantity': flow.get('quantity', ''),
                 'price': flow.get('price', ''),
                 'from_symbol': flow.get('from_symbol', ''),
+                'formatted_value': format_usd(flow['value'])
             }
             for flow in self.flow_data
         ]
@@ -368,42 +432,56 @@ class PortfolioFlowTracker:
         for i, label in enumerate(self.node_labels):
             if i in node_net_flows:
                 net_flow = node_net_flows[i]['inflows'] - node_net_flows[i]['outflows']
-                # Flip the sign and convert to thousands
-                net_flow_flipped = -net_flow / 1000
+                # Flip the sign for display
+                net_flow_display = format_usd(-net_flow)
                 
                 # Calculate additional values for stock nodes only
                 current_holdings = ""
                 if_held_value = ""
                 total_sales = ""
+                dividends_received = ""
+                dividends_if_held = ""
                 
                 if not self._is_source_node(label):
                     holdings_val, shares_val = self._calculate_current_holdings_value(label)
                     if_held_val, total_shares = self._calculate_if_held_value(label)
                     sales_val = self._calculate_total_sales(label)
-                    
+                    div_received_val, div_received_shares = self._calculate_dividends_received(label)
+                    div_if_held_val, div_if_held_shares = self._calculate_dividends_if_held(label)
+
                     if holdings_val > 0:
-                        current_holdings = f"<br>Current Holdings: ${holdings_val / 1000:.1f}K ({int(shares_val)})"
+                        current_holdings = f"<br>Current Holdings: {format_usd(holdings_val)} ({int(shares_val)})"
                     
                     if if_held_val > 0:
-                        if_held_value = f"<br>If Held Value: ${if_held_val / 1000:.1f}K ({total_shares})"
+                        if_held_value = f"<br>If Held Value: {format_usd(if_held_val)} ({total_shares})"
                     
                     if sales_val > 0:
-                        total_sales = f"<br>Total Sales: ${sales_val / 1000:.1f}K"
+                        total_sales = f"<br>Total Sales: {format_usd(sales_val)}"
+
+                    if div_received_val > 0:
+                        dividends_received = f"<br>Dividends Received: {format_usd(div_received_val)}"
+                    
+                    if div_if_held_val > 0:
+                        dividends_if_held = f"<br>Dividends If Held: {format_usd(div_if_held_val)}"
                 
                 node_customdata.append({
                     'label': label,
-                    'net_flow_flipped': net_flow_flipped,
+                    'net_flow_display': net_flow_display,
                     'current_holdings': current_holdings,
                     'if_held_value': if_held_value,
-                    'total_sales': total_sales
+                    'total_sales': total_sales,
+                    'dividends_received': dividends_received,
+                    'dividends_if_held': dividends_if_held
                 })
             else:
                 node_customdata.append({
                     'label': label,
-                    'net_flow_flipped': 0,
+                    'net_flow_display': '$0',
                     'current_holdings': "",
                     'if_held_value': "",
-                    'total_sales': ""
+                    'total_sales': "",
+                    'dividends_received': "",
+                    'dividends_if_held': ""
                 })
         
         hovertemplate = (
@@ -413,15 +491,17 @@ class PortfolioFlowTracker:
             'Type: %{customdata.type}<br>'
             'Quantity: %{customdata.quantity}<br>'
             'Price: %{customdata.price}<br>'
-            'Value (USD): %{value}<extra></extra>'
+            'Value (USD): %{customdata.formatted_value}<extra></extra>'
         )
         
         node_hovertemplate = (
             'Node: %{customdata.label}<br>'
-            'Net Flow: $%{customdata.net_flow_flipped:.1f}K'
+            'Net Flow: %{customdata.net_flow_display}'
             '%{customdata.current_holdings}'
             '%{customdata.if_held_value}'
             '%{customdata.total_sales}'
+            '%{customdata.dividends_received}'
+            '%{customdata.dividends_if_held}'
             '<extra></extra>'
         )
         
@@ -474,18 +554,16 @@ class PortfolioFlowTracker:
         
         try:
             # Get the latest price from the stock data
-            stock_file = os.path.join(self.resources_path, f"{symbol}.csv")
+            df = self._get_stock_data(symbol)
             
-            if os.path.exists(stock_file):
-                df = pd.read_csv(stock_file)
-                if not df.empty:
-                    latest_price = df.iloc[-1]['Close']
-                    # Get the currency for this symbol
-                    currency = self._get_stock_currency(symbol)
-                    # Convert to USD using today's date (or latest available exchange rate)
-                    today = datetime.now()
-                    usd_value = self._to_usd(position.quantity * latest_price, currency, today)
-                    return usd_value, int(position.quantity)
+            if df is not None and not df.empty:
+                latest_price = df.iloc[-1]['Close']
+                # Get the currency for this symbol
+                currency = self._get_stock_currency(symbol)
+                # Convert to USD using today's date (or latest available exchange rate)
+                today = datetime.now()
+                usd_value = self._to_usd(position.quantity * latest_price, currency, today)
+                return usd_value, int(position.quantity)
         except Exception as e:
             print(f"Warning: Could not get latest price for {symbol}: {e}")
         
@@ -495,8 +573,7 @@ class PortfolioFlowTracker:
         """Calculate the hypothetical value if all buy transactions were held and return (value, total_shares)."""
         try:
             # Read transactions to get all buy quantities
-            transactions_file = os.path.join(self.resources_path, "transactions.csv")
-            df = pd.read_csv(transactions_file)
+            df = self._get_transactions_df()
             
             # Filter for buy transactions for this symbol
             buy_transactions = df[(df['symbol'] == symbol) & (df['transaction'] == 'buy')]
@@ -508,17 +585,15 @@ class PortfolioFlowTracker:
             total_buy_quantity = buy_transactions['quantity'].sum()
             
             # Get the latest price
-            stock_file = os.path.join(self.resources_path, f"{symbol}.csv")
-            if os.path.exists(stock_file):
-                stock_df = pd.read_csv(stock_file)
-                if not stock_df.empty:
-                    latest_price = stock_df.iloc[-1]['Close']
-                    # Get the currency for this symbol
-                    currency = self._get_stock_currency(symbol)
-                    # Convert to USD using today's date (or latest available exchange rate)
-                    today = datetime.now()
-                    if_held_value = self._to_usd(total_buy_quantity * latest_price, currency, today)
-                    return if_held_value, int(total_buy_quantity)
+            stock_df = self._get_stock_data(symbol)
+            if stock_df is not None and not stock_df.empty:
+                latest_price = stock_df.iloc[-1]['Close']
+                # Get the currency for this symbol
+                currency = self._get_stock_currency(symbol)
+                # Convert to USD using today's date (or latest available exchange rate)
+                today = datetime.now()
+                if_held_value = self._to_usd(total_buy_quantity * latest_price, currency, today)
+                return if_held_value, int(total_buy_quantity)
         except Exception as e:
             print(f"Warning: Could not calculate if-held value for {symbol}: {e}")
         
@@ -528,8 +603,7 @@ class PortfolioFlowTracker:
         """Calculate the total value of all sell transactions for a given symbol."""
         try:
             # Read transactions to get all sell values
-            transactions_file = os.path.join(self.resources_path, "transactions.csv")
-            df = pd.read_csv(transactions_file)
+            df = self._get_transactions_df()
             
             # Filter for sell transactions for this symbol
             sell_transactions = df[(df['symbol'] == symbol) & (df['transaction'] == 'sell')]
@@ -555,6 +629,86 @@ class PortfolioFlowTracker:
             print(f"Warning: Could not calculate total sales for {symbol}: {e}")
         
         return 0.0
+
+    def _calculate_dividends_received(self, symbol: str) -> tuple[float, int]:
+        """Sum of all dividends times the number of shares owned that day, converted to USD."""
+        try:
+            stock_df = self._get_stock_data(symbol)
+            if stock_df is None: return 0.0, 0
+
+            tx_df = self._get_transactions_df()
+
+            tx_df = tx_df[tx_df["symbol"] == symbol].sort_values("date")
+            tx_df = tx_df[tx_df["transaction"].isin(["buy", "sell"])]
+
+            if 'Dividends' not in stock_df.columns:
+                return 0.0, 0
+                
+            dividend_dates = stock_df[stock_df['Dividends'] > 0]
+            if dividend_dates.empty:
+                return 0.0, 0
+            
+            total_dividends = 0.0
+            total_shares_for_dividends = 0
+            currency = self._get_stock_currency(symbol)
+
+            for date, stock_row in dividend_dates.iterrows():
+                relevant_tx = tx_df[tx_df['date'] <= date]
+                shares_held = relevant_tx[relevant_tx['transaction'] == 'buy']['quantity'].sum() - \
+                              relevant_tx[relevant_tx['transaction'] == 'sell']['quantity'].sum()
+
+                if shares_held > 0:
+                    dividend_per_share = stock_row['Dividends']
+                    dividend_value = shares_held * dividend_per_share
+                    assert isinstance(date, datetime)
+                    total_dividends += self._to_usd(dividend_value, currency, date)
+                    total_shares_for_dividends += int(shares_held)
+            
+            return total_dividends, total_shares_for_dividends
+        except Exception as e:
+            print(f"Warning: Could not calculate dividends received for {symbol}: {e}")
+            return 0.0, 0
+
+    def _calculate_dividends_if_held(self, symbol: str) -> tuple[float, int]:
+        """Sum of all dividends times the number of shares that would have been held if never sold, converted to USD."""
+        # If the position is still held, there's no "if held" scenario to calculate.
+        if symbol in self.positions:
+            return 0.0, 0
+            
+        try:
+            stock_df = self._get_stock_data(symbol)
+            if stock_df is None: return 0.0, 0
+
+            tx_df = self._get_transactions_df()
+
+            tx_df = tx_df[(tx_df["symbol"] == symbol) & (tx_df["transaction"] == "buy")].sort_values("date")
+
+            if 'Dividends' not in stock_df.columns:
+                return 0.0, 0
+                
+            dividend_dates = stock_df[stock_df['Dividends'] > 0]
+            if dividend_dates.empty:
+                return 0.0, 0
+            
+            total_dividends = 0.0
+            total_shares_for_dividends = 0
+            currency = self._get_stock_currency(symbol)
+
+            for date, stock_row in dividend_dates.iterrows():
+                relevant_tx = tx_df[tx_df['date'] <= date]
+                shares_held = relevant_tx['quantity'].sum()
+
+                if shares_held > 0:
+                    dividend_per_share = stock_row['Dividends']
+                    dividend_value = shares_held * dividend_per_share
+                    assert isinstance(date, datetime)
+                    total_dividends += self._to_usd(dividend_value, currency, date)
+                    total_shares_for_dividends += int(shares_held)
+            
+            return total_dividends, total_shares_for_dividends
+        except Exception as e:
+            print(f"Warning: Could not calculate dividends if held for {symbol}: {e}")
+            return 0.0, 0
 
     def _is_source_node(self, node_label: str) -> bool:
         """Check if a node is a source node (not a stock symbol)."""

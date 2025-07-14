@@ -19,6 +19,4 @@ portfolio_sankey.html
 .vscode/
 
 # Personal portfolio data
-src/resources/
-uv.lock
 .DS_Store

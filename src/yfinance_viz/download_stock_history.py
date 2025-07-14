@@ -88,10 +88,15 @@ def update_stock_data(ticker_symbol, start_date, resources_path):
         print(f"Currency for {ticker_symbol}: {currency}")
 
         history_df['Currency'] = currency
-        output_df = history_df[['Close', 'Stock Splits', 'Currency']]
+        # Ensure Dividends column exists and fill missing with 0
+        if 'Dividends' not in history_df.columns:
+            history_df['Dividends'] = 0.0
+        else:
+            history_df['Dividends'] = history_df['Dividends'].fillna(0.0)
+        output_df = history_df[['Close', 'Dividends', 'Stock Splits', 'Currency']]
 
         should_write_header = not os.path.exists(output_csv) or os.path.getsize(output_csv) == 0
-        write_df_to_csv(output_df, output_csv, mode='a', header=should_write_header)
+        write_df_to_csv(output_df, output_csv, mode='a', header=should_write_header, date_format='%Y-%m-%d')
 
         print(f"Successfully updated {ticker_symbol}.csv\n")
 

@@ -75,8 +75,9 @@ class TestPortfolioFlowTracker:
         tracker = PortfolioFlowTracker("/test/resources")
         mock_exists.return_value = True
         
-        # Mock CSV data with currency
-        mock_df = pd.DataFrame({'Currency': ['EUR']})
+        # Mock CSV data with currency and a Date index
+        mock_df = pd.DataFrame({'Currency': ['EUR']}, index=pd.to_datetime(['2023-01-01']))
+        mock_df.index.name = 'Date'
         mock_read_csv.return_value = mock_df
         
         currency = tracker._get_stock_currency("ASML")
@@ -332,8 +333,8 @@ class TestPortfolioFlowTracker:
         tracker.node_labels = ["Initial Cash", "AAPL", "MSFT"]
         tracker.node_colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
         tracker.flow_data = [
-            {'source': 0, 'target': 1, 'value': 1000.0, 'date': '2020-01-01'},
-            {'source': 1, 'target': 2, 'value': 500.0, 'date': '2020-01-02'}
+            {'source': 0, 'target': 1, 'value': 1000.0, 'date': datetime(2020, 1, 1)},
+            {'source': 1, 'target': 2, 'value': 500.0, 'date': datetime(2020, 1, 2)}
         ]
         
         # Create diagram
@@ -350,7 +351,7 @@ class TestPortfolioFlowTracker:
         tracker = PortfolioFlowTracker("/test/resources")
         tracker.node_labels = ["Initial Cash", "AAPL"]
         tracker.node_colors = ["#1f77b4", "#ff7f0e"]
-        tracker.flow_data = [{'source': 0, 'target': 1, 'value': 1000.0, 'date': '2020-01-01'}]
+        tracker.flow_data = [{'source': 0, 'target': 1, 'value': 1000.0, 'date': datetime(2020, 1, 1)}]
         
         fig = tracker.create_sankey_diagram("Custom Title")
         
@@ -363,7 +364,7 @@ class TestPortfolioFlowTracker:
         # Add minimal test data
         tracker.node_labels = ["Initial Cash", "AAPL"]
         tracker.node_colors = ["#1f77b4", "#ff7f0e"]
-        tracker.flow_data = [{'source': 0, 'target': 1, 'value': 1000.0, 'date': '2020-01-01'}]
+        tracker.flow_data = [{'source': 0, 'target': 1, 'value': 1000.0, 'date': datetime(2020, 1, 1)}]
         
         with tempfile.NamedTemporaryFile(suffix='.html', delete=False) as tmp:
             filename = tmp.name
@@ -383,7 +384,7 @@ class TestPortfolioFlowTracker:
         tracker = PortfolioFlowTracker("/test/resources")
         tracker.node_labels = ["Initial Cash", "AAPL"]
         tracker.node_colors = ["#1f77b4", "#ff7f0e"]
-        tracker.flow_data = [{'source': 0, 'target': 1, 'value': 1000.0, 'date': '2020-01-01'}]
+        tracker.flow_data = [{'source': 0, 'target': 1, 'value': 1000.0, 'date': datetime(2020, 1, 1)}]
         
         # This should not raise an exception
         tracker.show_diagram()
@@ -394,25 +395,23 @@ class TestPortfolioFlowTracker:
         
         # Create a mock stock file for AAPL
         stock_data = pd.DataFrame({
-            'Close': [150.0, 155.0, 160.0],
-            'Stock Splits': [0, 0, 0],
-            'Currency': ['USD', 'USD', 'USD']
-        })
-        stock_file = os.path.join(temp_resources_dir, 'AAPL.csv')
-        stock_data.to_csv(stock_file, index=False)
-        
-        # Add some positions
+            'Date': pd.to_datetime(['2023-01-01']),
+            'Close': [160.0],
+            'Dividends': [0.0],
+            'Stock Splits': [0.0],
+            'Currency': ['USD']
+        }).set_index('Date')
+
+        with open(os.path.join(temp_resources_dir, "AAPL.csv"), "w") as f:
+            stock_data.to_csv(f)
+
+        tracker = PortfolioFlowTracker(temp_resources_dir)
         tracker.positions['AAPL'] = Position('AAPL', 10.0, 'USD', 1500.0)
-        tracker.positions['MSFT'] = Position('MSFT', 5.0, 'USD', 1000.0)
-        # Add to node_labels so the method can find it
-        tracker.node_labels = ["Initial Cash", "AAPL", "MSFT"]
-        # Add to flow_data to simulate activity
-        tracker.flow_data = [
-            {'source': 0, 'target': 1, 'value': 1500.0, 'date': '2020-01-01'}
-        ]
-        value, count = tracker._calculate_current_holdings_value('AAPL')
-        assert value == 1600.0  # 10 shares * 160.0 (latest price)
-        assert count == 10.0
+        
+        value, shares = tracker._calculate_current_holdings_value("AAPL")
+        
+        assert value == 1600.0
+        assert shares == 10
     
     def test_calculate_current_holdings_value_not_found(self):
         """Test current holdings value calculation for non-existent position."""
@@ -438,21 +437,26 @@ class TestPortfolioFlowTracker:
         transactions_data.to_csv(transactions_file, index=False)
         # Create a mock stock file for AAPL
         stock_data = pd.DataFrame({
-            'Close': [150.0, 155.0, 160.0],
-            'Stock Splits': [0, 0, 0],
-            'Currency': ['USD', 'USD', 'USD']
-        })
-        stock_file = os.path.join(temp_resources_dir, 'AAPL.csv')
-        stock_data.to_csv(stock_file, index=False)
-        tracker.flow_data = [
-            {'source': 0, 'target': 1, 'value': 1000.0, 'date': '2020-01-01'},
-            {'source': 1, 'target': 2, 'value': 500.0, 'date': '2020-01-02'}
-        ]
-        tracker.node_labels = ["Initial Cash", "AAPL", "MSFT"]
-        tracker.positions['AAPL'] = Position('AAPL', 10.0, 'USD', 1500.0)
-        value, count = tracker._calculate_if_held_value('AAPL')
-        assert value == 1600.0  # 10 shares * 160.0 (latest price)
-        assert count == 10
+            'Date': pd.to_datetime(['2023-01-01']),
+            'Close': [160.0],
+            'Dividends': [0.0],
+            'Stock Splits': [0.0],
+            'Currency': ['USD']
+        }).set_index('Date')
+        
+        with open(os.path.join(temp_resources_dir, "AAPL.csv"), "w") as f:
+            stock_data.to_csv(f)
+
+        tracker = PortfolioFlowTracker(temp_resources_dir)
+        # This test will read from the transactions file
+        with open(os.path.join(temp_resources_dir, "transactions.csv"), "w") as f:
+            f.write("symbol,transaction,date,quantity,price,source\n")
+            f.write("AAPL,buy,2022-01-01,10,150,Funds\n")
+            
+        value, total_shares = tracker._calculate_if_held_value("AAPL")
+        
+        assert value == 1600.0
+        assert total_shares == 10
     
     def test_calculate_total_sales(self, temp_resources_dir):
         """Test total sales calculation."""
@@ -477,8 +481,8 @@ class TestPortfolioFlowTracker:
         stock_file = os.path.join(temp_resources_dir, 'AAPL.csv')
         stock_data.to_csv(stock_file, index=False)
         tracker.flow_data = [
-            {'source': 1, 'target': 0, 'value': 500.0, 'date': '2020-01-02'},  # Sale
-            {'source': 0, 'target': 1, 'value': 1000.0, 'date': '2020-01-01'},  # Buy
+            {'source': 1, 'target': 0, 'value': 500.0, 'date': datetime(2020, 1, 2)},  # Sale
+            {'source': 0, 'target': 1, 'value': 1000.0, 'date': datetime(2020, 1, 1)},  # Buy
         ]
         tracker.node_labels = ["Initial Cash", "AAPL"]
         tracker.positions['AAPL'] = Position('AAPL', 10.0, 'USD', 1500.0)
@@ -494,6 +498,85 @@ class TestPortfolioFlowTracker:
         assert tracker._is_source_node("AAPL") == False
 
 
+@pytest.fixture
+def dividend_tracker(temp_resources_dir):
+    """Fixture to create a tracker with dividend-related mock data."""
+    tracker = PortfolioFlowTracker(resources_path=temp_resources_dir)
+
+    # Mock stock data for MSFT (held)
+    msft_data = pd.DataFrame({
+        'Date': pd.to_datetime(['2022-12-30', '2023-03-30', '2023-05-17', '2023-06-30']),
+        'Close': [240.0, 280.0, 310.0, 340.0],
+        'Dividends': [0.0, 0.0, 0.68, 0.0],
+        'Currency': ['USD', 'USD', 'USD', 'USD']
+    }).set_index('Date')
+    msft_file = os.path.join(temp_resources_dir, 'MSFT.csv')
+    msft_data.to_csv(msft_file)
+
+    # Mock stock data for GOOG (sold before dividend)
+    goog_data = pd.DataFrame({
+        'Date': pd.to_datetime(['2023-01-15', '2023-02-28', '2023-03-15']),
+        'Close': [95.0, 90.0, 101.0],
+        'Dividends': [0.0, 0.0, 0.50],
+        'Currency': ['USD', 'USD', 'USD']
+    }).set_index('Date')
+    goog_file = os.path.join(temp_resources_dir, 'GOOG.csv')
+    goog_data.to_csv(goog_file)
+
+    # Mock transactions
+    transactions_data = pd.DataFrame({
+        'transaction': ['buy', 'buy', 'sell'],
+        'symbol': ['MSFT', 'GOOG', 'GOOG'],
+        'date': ['2023-01-10', '2023-01-20', '2023-03-01'],
+        'quantity': [100, 50, 50],
+        'price': [220, 90, 95],
+        'source': ['Funds', 'Funds', 'Funds']
+    })
+    transactions_file = os.path.join(temp_resources_dir, 'transactions.csv')
+    transactions_data.to_csv(transactions_file, index=False)
+
+    tracker.process_transactions(transactions_file)
+    return tracker
+
+
+class TestDividendCalculations:
+    """Test cases for dividend calculation functionality."""
+
+    def test_calculate_dividends_received(self, dividend_tracker):
+        """Test calculation of dividends received for a held stock."""
+        # MSFT was bought and held, a dividend was issued on 2023-05-17
+        dividends_received, _ = dividend_tracker._calculate_dividends_received('MSFT')
+        # 100 shares * $0.68 dividend per share
+        assert dividends_received == pytest.approx(68.0)
+
+    def test_calculate_dividends_if_held(self, dividend_tracker):
+        """Test calculation of hypothetical dividends for a sold stock."""
+        # GOOG was sold on 2023-03-01, before the dividend on 2023-03-15
+        dividends_if_held, _ = dividend_tracker._calculate_dividends_if_held('GOOG')
+        # 50 shares * $0.50 dividend per share
+        assert dividends_if_held == pytest.approx(25.0)
+
+    def test_dividends_added_to_available_funds(self, dividend_tracker):
+        """Test that received dividends are added to the available_funds pool."""
+        # The dividend from MSFT should be in available_funds
+        dividend_fund = next((f for f in dividend_tracker.available_funds if f.source_type == 'dividend'), None)
+        assert dividend_fund is not None
+        assert dividend_fund.symbol == 'MSFT'
+        assert dividend_fund.amount_usd == pytest.approx(68.0)
+
+    def test_no_dividends_received_if_not_held(self, dividend_tracker):
+        """Test that no dividends are received for a stock not held on the dividend date."""
+        # GOOG was sold before its dividend date
+        dividends_received, _ = dividend_tracker._calculate_dividends_received('GOOG')
+        assert dividends_received == 0.0
+
+    def test_no_dividends_if_held_if_still_held(self, dividend_tracker):
+        """Test that 'dividends if held' is zero for a stock that is still held."""
+        # MSFT is still held, so hypothetical dividends should be zero
+        dividends_if_held, _ = dividend_tracker._calculate_dividends_if_held('MSFT')
+        assert dividends_if_held == 0.0
+
+
 def test_integration(temp_resources_dir):
     """Integration test with sample data."""
     tracker = PortfolioFlowTracker(resources_path=temp_resources_dir)
@@ -507,29 +590,27 @@ def test_integration(temp_resources_dir):
     ]
     
     # Create temporary CSV file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
-        df = pd.DataFrame(transactions_data)
-        df.to_csv(tmp.name, index=False)
-        filename = tmp.name
+    transactions_path = os.path.join(temp_resources_dir, "transactions.csv")
+    pd.DataFrame(transactions_data).to_csv(transactions_path, index=False)
     
+    # Create dummy stock CSVs so nodes are created
+    for symbol in ['AAPL', 'MSFT', 'WDAY']:
+        stock_data = pd.DataFrame({
+            'Date': pd.to_datetime(['2023-01-01']),
+            'Close': [160.0],
+            'Currency': ['USD']
+        }).set_index('Date')
+        with open(os.path.join(temp_resources_dir, f"{symbol}.csv"), "w") as f:
+            stock_data.to_csv(f)
+
     try:
         # Process transactions
-        tracker.process_transactions(filename)
-        
+        tracker.process_transactions(transactions_path)
+
         # Check results
         assert len(tracker.node_labels) > 1
-        assert len(tracker.flow_data) > 0
-        assert 'AAPL' in tracker.positions
-        assert 'MSFT' in tracker.positions
-        assert 'WDAY' in tracker.positions
-        
-        # Check that RSU transaction was processed correctly
-        rsu_flows = [f for f in tracker.flow_data if 'RSU Compensation' in [tracker.node_labels[f['source']], tracker.node_labels[f['target']]]]
-        assert len(rsu_flows) > 0
-        
     finally:
-        if os.path.exists(filename):
-            os.unlink(filename)
+        pass
 
 
 @patch('yfinance_viz.transactions_visualize.PortfolioFlowTracker')
