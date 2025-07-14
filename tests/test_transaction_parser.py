@@ -5,10 +5,10 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-# Add src directory to the path to allow imports
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+# Add yfinance_viz module to the path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from transaction_parser import (
+from yfinance_viz.transaction_parser import (
     extract_transactions_from_file,
     format_transaction,
     process_transactions,
@@ -119,7 +119,7 @@ def test_extract_transactions_from_nonexistent_file(mock_resources_dir: Path):
     transactions = list(extract_transactions_from_file(file_path))
     assert len(transactions) == 0
 
-@patch('transaction_parser.prompt_user_for_file')
+@patch('yfinance_viz.transaction_parser.prompt_user_for_file')
 def test_process_transactions(mock_prompt, mock_resources_dir: Path):
     """Tests processing of all transaction files in a directory."""
     # Mock user input to always return True
@@ -129,7 +129,7 @@ def test_process_transactions(mock_prompt, mock_resources_dir: Path):
     assert len(processed) == 1 # Only one transaction is valid
     assert processed[0]['symbol'] == 'AAPL'
 
-@patch('transaction_parser.prompt_user_for_file')
+@patch('yfinance_viz.transaction_parser.prompt_user_for_file')
 def test_process_transactions_user_skips_files(mock_prompt, mock_resources_dir: Path):
     """Tests processing when user skips all files."""
     # Mock user input to always return False
@@ -243,47 +243,43 @@ def test_determine_transaction_source_case_insensitive():
     source = determine_transaction_source(transaction)
     assert source == 'RSU'
 
-@patch('transaction_parser.process_transactions')
-@patch('transaction_parser.write_csv')
-@patch('transaction_parser.Path')
+@patch('yfinance_viz.transaction_parser.process_transactions')
+@patch('yfinance_viz.transaction_parser.write_csv')
+@patch('yfinance_viz.transaction_parser.Path')
 def test_transaction_parser_success(mock_path, mock_write_csv, mock_process_transactions):
     """Test the main transaction_parser function."""
     # Mock the path operations
-    mock_base_dir = MagicMock()
     mock_resources_path = MagicMock()
     mock_output_path = MagicMock()
     
-    mock_path.return_value.parent.parent = mock_base_dir
-    mock_base_dir.__truediv__.return_value.__truediv__.return_value = mock_resources_path
+    mock_path.return_value = mock_resources_path
     mock_resources_path.__truediv__.return_value = mock_output_path
     
     # Mock process_transactions to return some data
     mock_process_transactions.return_value = [{'transaction': 'buy', 'symbol': 'AAPL'}]
     
-    result = transaction_parser()
+    result = transaction_parser("/test/resources")
     
     assert result == 0
     mock_process_transactions.assert_called_once_with(mock_resources_path)
     mock_write_csv.assert_called_once_with([{'transaction': 'buy', 'symbol': 'AAPL'}], mock_output_path)
 
-@patch('transaction_parser.process_transactions')
-@patch('transaction_parser.write_csv')
-@patch('transaction_parser.Path')
+@patch('yfinance_viz.transaction_parser.process_transactions')
+@patch('yfinance_viz.transaction_parser.write_csv')
+@patch('yfinance_viz.transaction_parser.Path')
 def test_transaction_parser_empty_transactions(mock_path, mock_write_csv, mock_process_transactions):
     """Test transaction_parser with empty transactions."""
     # Mock the path operations
-    mock_base_dir = MagicMock()
     mock_resources_path = MagicMock()
     mock_output_path = MagicMock()
     
-    mock_path.return_value.parent.parent = mock_base_dir
-    mock_base_dir.__truediv__.return_value.__truediv__.return_value = mock_resources_path
+    mock_path.return_value = mock_resources_path
     mock_resources_path.__truediv__.return_value = mock_output_path
     
     # Mock process_transactions to return empty list
     mock_process_transactions.return_value = []
     
-    result = transaction_parser()
+    result = transaction_parser("/test/resources")
     
     assert result == 0
     mock_write_csv.assert_called_once_with([], mock_output_path)

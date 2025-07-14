@@ -1,8 +1,11 @@
 import pandas as pd
 import yfinance as yf
 import os
+import argparse
 from datetime import date, timedelta
+from typing import Union
 import traceback
+import sys
 
 
 def get_ticker_info(ticker_symbol):
@@ -45,13 +48,8 @@ def update_stock_data(ticker_symbol, start_date, resources_path):
         ticker_symbol (str): The stock ticker symbol
         start_date (str or date): Start date for fetching data. Can be a string in 'YYYY-MM-DD' format or a date object
         resources_path (str): Path to the resources directory where CSV files will be saved. 
-                             If relative path, will be resolved relative to the script's location.
+                             Relative paths will be resolved relative to the current working directory.
     """
-    # If resources_path is relative, make it relative to the script's location
-    if not os.path.isabs(resources_path):
-        base_path = os.path.dirname(__file__)
-        resources_path = os.path.join(base_path, resources_path)
-    
     # Create resources directory if it doesn't exist
     if not os.path.exists(resources_path):
         os.makedirs(resources_path)
@@ -106,12 +104,13 @@ def write_df_to_csv(df, *args, **kwargs):
     return df.to_csv(*args, **kwargs)
 
 
-def download_stock_history():
+def download_stock_history(resources_path: str):
     """
     Downloads and updates daily stock price history for tickers in transactions.csv.
+    
+    Args:
+        resources_path: Path to the resources directory.
     """
-    base_path = os.path.dirname(__file__)
-    resources_path = os.path.join(base_path, 'resources')
     transactions_file = os.path.join(resources_path, 'transactions.csv')
 
     if not os.path.exists(resources_path):
@@ -147,5 +146,20 @@ def download_stock_history():
         update_stock_data(ticker_symbol, start_date, resources_path)
 
 
+def main():
+    """CLI entry point for the stock history downloader."""
+    parser = argparse.ArgumentParser(description="Download historical stock data for portfolio tickers")
+    parser.add_argument(
+        "--resources-path", 
+        type=str, 
+        required=True,
+        help="Path to the resources directory containing transactions.csv"
+    )
+    
+    args = parser.parse_args()
+    download_stock_history(args.resources_path)
+    return 0
+
+
 if __name__ == "__main__":
-    download_stock_history()
+    sys.exit(main())

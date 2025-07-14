@@ -1,5 +1,6 @@
 import json
 import sys
+import argparse
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Union
 
@@ -115,16 +116,29 @@ def write_csv(transactions: List[Dict[str, Any]], output_path: Path) -> None:
     print(f"Successfully created {output_path}")
 
 
-def transaction_parser() -> int:
+def transaction_parser(resources_path: str) -> int:
     """Main function to run the transaction parsing and CSV generation."""
-    base_dir = Path(__file__).parent.parent
-    resources_path = base_dir / "src" / "resources"
-    output_csv_path = resources_path / "transactions.csv"
+    resources_path_obj = Path(resources_path)
+    output_csv_path = resources_path_obj / "transactions.csv"
 
-    processed_data = process_transactions(resources_path)
+    processed_data = process_transactions(resources_path_obj)
     write_csv(processed_data, output_csv_path)
     return 0
 
 
+def main():
+    """CLI entry point for the transaction parser."""
+    parser = argparse.ArgumentParser(description="Parse transaction JSON files and generate CSV")
+    parser.add_argument(
+        "--resources-path", 
+        type=str, 
+        required=True,
+        help="Path to the resources directory containing JSON files"
+    )
+    
+    args = parser.parse_args()
+    return transaction_parser(args.resources_path)
+
+
 if __name__ == "__main__":
-    sys.exit(transaction_parser())
+    sys.exit(main())

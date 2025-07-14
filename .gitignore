@@ -20,3 +20,5 @@ portfolio_sankey.html
 
 # Personal portfolio data
 src/resources/
+uv.lock
+.DS_Store

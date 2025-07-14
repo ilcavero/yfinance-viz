@@ -3,8 +3,14 @@ from unittest.mock import patch, MagicMock
 import pandas as pd
 import os
 import shutil
+import sys
+from pathlib import Path
 from datetime import date
-from src.download_stock_history import (
+
+# Add yfinance_viz module to the path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from yfinance_viz.download_stock_history import (
     get_start_date, 
     update_stock_data, 
     get_ticker_info, 
@@ -81,8 +87,8 @@ def test_get_start_date_with_file_not_found_error(test_environment):
     start_date = get_start_date(output_csv, transactions_df, 'AAPL')
     assert start_date == date(2022, 12, 1)
 
-@patch('src.download_stock_history.get_stock_history')
-@patch('src.download_stock_history.get_ticker_info')
+@patch('yfinance_viz.download_stock_history.get_stock_history')
+@patch('yfinance_viz.download_stock_history.get_ticker_info')
 def test_update_stock_data(mock_get_ticker_info, mock_get_stock_history, test_environment):
     """Test the complete update_stock_data function with mocked yfinance calls."""
     test_dir, _ = test_environment
@@ -109,8 +115,8 @@ def test_update_stock_data(mock_get_ticker_info, mock_get_stock_history, test_en
     assert result_df['Close'][0] == 155.0
     assert result_df['Currency'][0] == 'USD'
 
-@patch('src.download_stock_history.get_stock_history')
-@patch('src.download_stock_history.get_ticker_info')
+@patch('yfinance_viz.download_stock_history.get_stock_history')
+@patch('yfinance_viz.download_stock_history.get_ticker_info')
 def test_update_stock_data_with_string_date(mock_get_ticker_info, mock_get_stock_history, test_environment):
     """Test update_stock_data with string date parameter."""
     test_dir, _ = test_environment
@@ -128,8 +134,8 @@ def test_update_stock_data_with_string_date(mock_get_ticker_info, mock_get_stock
 
     assert os.path.exists(output_csv)
 
-@patch('src.download_stock_history.get_stock_history')
-@patch('src.download_stock_history.get_ticker_info')
+@patch('yfinance_viz.download_stock_history.get_stock_history')
+@patch('yfinance_viz.download_stock_history.get_ticker_info')
 def test_update_stock_data_with_invalid_date_string(mock_get_ticker_info, mock_get_stock_history, test_environment):
     """Test update_stock_data with invalid date string."""
     test_dir, _ = test_environment
@@ -143,8 +149,8 @@ def test_update_stock_data_with_invalid_date_string(mock_get_ticker_info, mock_g
     output_csv = os.path.join(test_dir, f"{ticker_symbol}.csv")
     assert not os.path.exists(output_csv)
 
-@patch('src.download_stock_history.get_stock_history')
-@patch('src.download_stock_history.get_ticker_info')
+@patch('yfinance_viz.download_stock_history.get_stock_history')
+@patch('yfinance_viz.download_stock_history.get_ticker_info')
 def test_update_stock_data_with_future_date(mock_get_ticker_info, mock_get_stock_history, test_environment):
     """Test update_stock_data with future date."""
     test_dir, _ = test_environment
@@ -158,8 +164,8 @@ def test_update_stock_data_with_future_date(mock_get_ticker_info, mock_get_stock
     output_csv = os.path.join(test_dir, f"{ticker_symbol}.csv")
     assert not os.path.exists(output_csv)
 
-@patch('src.download_stock_history.get_stock_history')
-@patch('src.download_stock_history.get_ticker_info')
+@patch('yfinance_viz.download_stock_history.get_stock_history')
+@patch('yfinance_viz.download_stock_history.get_ticker_info')
 def test_update_stock_data_with_empty_history(mock_get_ticker_info, mock_get_stock_history, test_environment):
     """Test update_stock_data when yfinance returns empty history."""
     test_dir, _ = test_environment
@@ -176,8 +182,8 @@ def test_update_stock_data_with_empty_history(mock_get_ticker_info, mock_get_sto
     output_csv = os.path.join(test_dir, f"{ticker_symbol}.csv")
     assert not os.path.exists(output_csv)
 
-@patch('src.download_stock_history.get_stock_history')
-@patch('src.download_stock_history.get_ticker_info')
+@patch('yfinance_viz.download_stock_history.get_stock_history')
+@patch('yfinance_viz.download_stock_history.get_ticker_info')
 def test_update_stock_data_with_exception(mock_get_ticker_info, mock_get_stock_history, test_environment):
     """Test update_stock_data when yfinance raises an exception."""
     test_dir, _ = test_environment
@@ -193,9 +199,9 @@ def test_update_stock_data_with_exception(mock_get_ticker_info, mock_get_stock_h
     output_csv = os.path.join(test_dir, f"{ticker_symbol}.csv")
     assert not os.path.exists(output_csv)
 
-@patch('src.download_stock_history.get_stock_history')
-@patch('src.download_stock_history.get_ticker_info')
-@patch('src.download_stock_history.write_df_to_csv')
+@patch('yfinance_viz.download_stock_history.get_stock_history')
+@patch('yfinance_viz.download_stock_history.get_ticker_info')
+@patch('yfinance_viz.download_stock_history.write_df_to_csv')
 def test_update_stock_data_append_to_existing(mock_write_df_to_csv, mock_get_ticker_info, mock_get_stock_history, test_environment):
     """Test update_stock_data appending to existing CSV file."""
     test_dir, _ = test_environment
@@ -245,8 +251,8 @@ def test_get_stock_history(mock_ticker_class):
     assert result.equals(mock_history_df)
     mock_ticker.history.assert_called_once_with(start='2023-01-10', end='2023-01-11', auto_adjust=False)
 
-@patch('src.download_stock_history.update_stock_data')
-@patch('src.download_stock_history.get_start_date')
+@patch('yfinance_viz.download_stock_history.update_stock_data')
+@patch('yfinance_viz.download_stock_history.get_start_date')
 @patch('pandas.read_csv')
 @patch('os.path.exists')
 def test_download_stock_history_success(mock_exists, mock_read_csv, mock_get_start_date, mock_update_stock_data, test_environment):
@@ -265,9 +271,8 @@ def test_download_stock_history_success(mock_exists, mock_read_csv, mock_get_sta
     # Mock start date
     mock_get_start_date.return_value = date(2023, 1, 1)
     
-    # Patch only os.path.dirname to return test_dir
-    with patch('src.download_stock_history.os.path.dirname', return_value=test_dir):
-        download_stock_history()
+    # Call download_stock_history with test_dir as resources_path
+    download_stock_history(test_dir)
     
     # Should call update_stock_data for each ticker plus EURUSD=X
     assert mock_update_stock_data.call_count == 3  # AAPL, GOOGL, EURUSD=X
@@ -284,6 +289,6 @@ def test_download_stock_history_missing_transactions_file(mock_exists, mock_read
     # Mock FileNotFoundError when reading transactions
     mock_read_csv.side_effect = FileNotFoundError("File not found")
     
-    with patch('src.download_stock_history.os.path.dirname', return_value=test_dir):
-        download_stock_history()
+    # Call download_stock_history with test_dir as resources_path
+    download_stock_history(test_dir)
     # Should handle the error gracefully without raising exception

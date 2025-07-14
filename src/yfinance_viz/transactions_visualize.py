@@ -10,7 +10,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 import os
-from typing import Dict, List, Tuple, Optional
+import argparse
+from typing import Dict, List, Tuple, Optional, Union
 from dataclasses import dataclass
 
 @dataclass
@@ -29,7 +30,7 @@ class FundSource:
     transaction_id: int
 
 class PortfolioFlowTracker:
-    def __init__(self, resources_path: str = "src/resources"):
+    def __init__(self, resources_path: str):
         self.resources_path = resources_path
         self.positions: Dict[str, Position] = {}
         self.available_funds: List[FundSource] = []
@@ -257,8 +258,10 @@ class PortfolioFlowTracker:
         
         return allocated
 
-    def process_transactions(self, transactions_file: str = "src/resources/transactions.csv"):
+    def process_transactions(self, transactions_file: Union[str, None] = None):
         """Process all transactions and build the flow data."""
+        if transactions_file is None:
+            transactions_file = os.path.join(self.resources_path, "transactions.csv")
         df = pd.read_csv(transactions_file)
         
         # Sort by date, then by transaction type (sell=0, buy=1), then by row order
@@ -558,8 +561,8 @@ class PortfolioFlowTracker:
         source_nodes = ["Initial Cash", "RSU Compensation", "ESPP Compensation", "PSU Compensation"]
         return node_label in source_nodes
 
-def main():
-    tracker = PortfolioFlowTracker()
+def main(resources_path: str):
+    tracker = PortfolioFlowTracker(resources_path)
     print("Processing transactions...")
     tracker.process_transactions()
     print("Creating Sankey diagram...")
@@ -573,5 +576,21 @@ def main():
     for symbol, position in tracker.positions.items():
         print(f"  {symbol}: {position.quantity:.2f} shares ({position.currency})")
 
+def cli_main():
+    """CLI entry point for the portfolio visualizer."""
+    parser = argparse.ArgumentParser(description="Generate portfolio flow visualization")
+    parser.add_argument(
+        "--resources-path", 
+        type=str, 
+        required=True,
+        help="Path to the resources directory containing transactions.csv and stock data"
+    )
+    
+    args = parser.parse_args()
+    main(args.resources_path)
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.exit(cli_main())

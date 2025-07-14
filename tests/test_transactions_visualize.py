@@ -6,9 +6,15 @@ import pytest
 import pandas as pd
 import tempfile
 import os
+import sys
+from pathlib import Path
 from datetime import datetime
 from unittest.mock import patch, MagicMock
-from src.transactions_visualize import PortfolioFlowTracker, Position, FundSource
+
+# Add yfinance_viz module to the path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from yfinance_viz.transactions_visualize import PortfolioFlowTracker, Position, FundSource
 
 
 @pytest.fixture
@@ -23,7 +29,7 @@ class TestPortfolioFlowTracker:
     
     def test_initialization(self):
         """Test that the tracker initializes correctly."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         assert tracker.node_labels == ["Initial Cash"]
         assert len(tracker.node_colors) == 1
         assert len(tracker.positions) == 0
@@ -33,7 +39,7 @@ class TestPortfolioFlowTracker:
     @patch('pandas.read_csv')
     def test_get_stock_currency(self, mock_read_csv, mock_exists):
         """Test currency detection for stocks."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         mock_exists.return_value = True
         
         # Mock CSV data with USD currency
@@ -48,7 +54,7 @@ class TestPortfolioFlowTracker:
     @patch('pandas.read_csv')
     def test_get_stock_currency_with_cache(self, mock_read_csv, mock_exists):
         """Test currency detection with caching."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         mock_exists.return_value = True
         
         # Mock CSV data with USD currency
@@ -66,7 +72,7 @@ class TestPortfolioFlowTracker:
     @patch('pandas.read_csv')
     def test_get_stock_currency_with_file(self, mock_read_csv, mock_exists):
         """Test currency detection when stock file exists."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         mock_exists.return_value = True
         
         # Mock CSV data with currency
@@ -79,7 +85,7 @@ class TestPortfolioFlowTracker:
     @patch('os.path.exists')
     def test_get_stock_currency_file_not_found(self, mock_exists):
         """Test currency detection when stock file doesn't exist."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         mock_exists.return_value = False
         
         currency = tracker._get_stock_currency("UNKNOWN")
@@ -89,7 +95,7 @@ class TestPortfolioFlowTracker:
     @patch('pandas.read_csv')
     def test_get_stock_currency_exception_handling(self, mock_read_csv, mock_exists):
         """Test currency detection with exception handling."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         mock_exists.return_value = True
         mock_read_csv.side_effect = Exception("File read error")
         
@@ -98,7 +104,7 @@ class TestPortfolioFlowTracker:
     
     def test_convert_to_usd(self):
         """Test currency conversion to USD."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         date = datetime(2020, 1, 1)
         
         # Test USD to USD (no conversion)
@@ -117,7 +123,7 @@ class TestPortfolioFlowTracker:
     
     def test_eur_to_usd_with_exact_rate(self):
         """Test EUR to USD conversion with exact rate."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         date = datetime(2020, 1, 1)
         date_str = date.strftime('%Y-%m-%d')
         
@@ -129,7 +135,7 @@ class TestPortfolioFlowTracker:
     
     def test_eur_to_usd_with_nearest_rate(self):
         """Test EUR to USD conversion with nearest rate."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         date = datetime(2020, 1, 1)
         
         # Add some test rates
@@ -144,7 +150,7 @@ class TestPortfolioFlowTracker:
     
     def test_eur_to_usd_no_rates_available(self):
         """Test EUR to USD conversion when no rates are available."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         tracker.exchange_rates = {}
         tracker.sorted_rate_keys = []
         date = datetime(2020, 1, 1)
@@ -154,7 +160,7 @@ class TestPortfolioFlowTracker:
     
     def test_add_node(self):
         """Test node addition."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         node_idx = tracker._add_node("AAPL")
         assert node_idx == 1  # After Initial Cash
         assert "AAPL" in tracker.node_labels
@@ -162,7 +168,7 @@ class TestPortfolioFlowTracker:
     
     def test_add_node_duplicate(self):
         """Test adding the same node twice."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         node_idx1 = tracker._add_node("AAPL")
         node_idx2 = tracker._add_node("AAPL")
         assert node_idx1 == node_idx2
@@ -170,7 +176,7 @@ class TestPortfolioFlowTracker:
     
     def test_get_node_color(self):
         """Test node color assignment."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         idx1 = tracker._add_node("AAPL")
         idx2 = tracker._add_node("MSFT")
         color1 = tracker.node_colors[idx1]
@@ -182,7 +188,7 @@ class TestPortfolioFlowTracker:
     
     def test_process_sell_transaction(self):
         """Test sell transaction processing."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         transaction = pd.Series({
             'symbol': 'AAPL',
             'quantity': 10.0,
@@ -197,7 +203,7 @@ class TestPortfolioFlowTracker:
     
     def test_process_sell_transaction_with_existing_position(self):
         """Test sell transaction when position already exists."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         
         # Add existing position
         tracker.positions['AAPL'] = Position('AAPL', 20.0, 'USD', 3000.0)
@@ -216,7 +222,7 @@ class TestPortfolioFlowTracker:
     
     def test_process_sell_transaction_remove_position(self):
         """Test sell transaction that removes entire position."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         
         # Add existing position
         tracker.positions['AAPL'] = Position('AAPL', 10.0, 'USD', 1500.0)
@@ -235,7 +241,7 @@ class TestPortfolioFlowTracker:
     
     def test_process_buy_transaction(self):
         """Test buy transaction processing."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         transaction = pd.Series({
             'symbol': 'AAPL',
             'quantity': 10.0,
@@ -250,7 +256,7 @@ class TestPortfolioFlowTracker:
     
     def test_process_buy_transaction_existing_position(self):
         """Test buy transaction when position already exists."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         
         # Add existing position
         tracker.positions['AAPL'] = Position('AAPL', 5.0, 'USD', 750.0)
@@ -270,7 +276,7 @@ class TestPortfolioFlowTracker:
     
     def test_process_employment_transaction(self):
         """Test employment transaction processing."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         transaction = pd.Series({
             'symbol': 'WDAY',
             'quantity': 100.0,
@@ -287,7 +293,7 @@ class TestPortfolioFlowTracker:
     
     def test_allocate_funds(self):
         """Test fund allocation."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         # Add some available funds
         fund1 = FundSource('sell', 'AAPL', 1000.0, datetime(2020, 1, 1), 0)
         fund2 = FundSource('sell', 'MSFT', 500.0, datetime(2020, 1, 2), 1)
@@ -300,7 +306,7 @@ class TestPortfolioFlowTracker:
     
     def test_allocate_funds_with_initial_cash(self):
         """Test fund allocation when initial cash is needed."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         # Add some available funds
         fund1 = FundSource('sell', 'AAPL', 500.0, datetime(2020, 1, 1), 0)
         tracker.available_funds = [fund1]
@@ -312,7 +318,7 @@ class TestPortfolioFlowTracker:
     
     def test_allocate_funds_no_available_funds(self):
         """Test fund allocation when no funds are available."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         tracker.available_funds = []
         
         allocations = tracker._allocate_funds(1000.0, 'GOOGL', datetime(2020, 1, 1))
@@ -321,7 +327,7 @@ class TestPortfolioFlowTracker:
     
     def test_create_sankey_diagram(self):
         """Test Sankey diagram creation."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         # Add some test data
         tracker.node_labels = ["Initial Cash", "AAPL", "MSFT"]
         tracker.node_colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
@@ -341,7 +347,7 @@ class TestPortfolioFlowTracker:
     
     def test_create_sankey_diagram_with_title(self):
         """Test Sankey diagram creation with custom title."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         tracker.node_labels = ["Initial Cash", "AAPL"]
         tracker.node_colors = ["#1f77b4", "#ff7f0e"]
         tracker.flow_data = [{'source': 0, 'target': 1, 'value': 1000.0, 'date': '2020-01-01'}]
@@ -353,7 +359,7 @@ class TestPortfolioFlowTracker:
     
     def test_save_diagram(self):
         """Test diagram saving."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         # Add minimal test data
         tracker.node_labels = ["Initial Cash", "AAPL"]
         tracker.node_colors = ["#1f77b4", "#ff7f0e"]
@@ -374,7 +380,7 @@ class TestPortfolioFlowTracker:
     
     def test_show_diagram(self):
         """Test diagram display."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         tracker.node_labels = ["Initial Cash", "AAPL"]
         tracker.node_colors = ["#1f77b4", "#ff7f0e"]
         tracker.flow_data = [{'source': 0, 'target': 1, 'value': 1000.0, 'date': '2020-01-01'}]
@@ -410,7 +416,7 @@ class TestPortfolioFlowTracker:
     
     def test_calculate_current_holdings_value_not_found(self):
         """Test current holdings value calculation for non-existent position."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         
         value, count = tracker._calculate_current_holdings_value('UNKNOWN')
         assert value == 0.0
@@ -481,7 +487,7 @@ class TestPortfolioFlowTracker:
     
     def test_is_source_node(self):
         """Test source node identification."""
-        tracker = PortfolioFlowTracker()
+        tracker = PortfolioFlowTracker("/test/resources")
         
         assert tracker._is_source_node("Initial Cash") == True
         assert tracker._is_source_node("RSU Compensation") == True
@@ -526,7 +532,7 @@ def test_integration(temp_resources_dir):
             os.unlink(filename)
 
 
-@patch('src.transactions_visualize.PortfolioFlowTracker')
+@patch('yfinance_viz.transactions_visualize.PortfolioFlowTracker')
 def test_main_function(mock_tracker_class):
     """Test the main function."""
     mock_tracker = MagicMock()
@@ -535,9 +541,9 @@ def test_main_function(mock_tracker_class):
     mock_tracker.process_transactions.return_value = [1]
     mock_tracker.node_labels = ["Initial Cash", "AAPL"]
     mock_tracker.flow_data = [1]
-    from src.transactions_visualize import main
-    main()
-    mock_tracker_class.assert_called_once()
+    from yfinance_viz.transactions_visualize import main
+    main("/test/resources")
+    mock_tracker_class.assert_called_once_with("/test/resources")
     mock_tracker.process_transactions.assert_called_once()
     mock_tracker.save_diagram.assert_called_once()
     # Do not assert create_sankey_diagram, as it is called inside save_diagram
